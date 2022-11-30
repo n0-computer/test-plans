@@ -9,7 +9,7 @@ A few things to note:
 - the dev cycle is painful. You can short circuit some issues by running `cargo run --bin MY_PLAN` to ensure it builds before running it on testground. Note: the test will panic when you run it like this, that is expected.
 - log log log. log a lot and often when you are starting to write your test plan. Logs are the only way you can get insight into your test at this stage, and the cycle to add a log and run the test again is __long__. Just err on the side of logging too much & remove everything unnecessary later.
 
-This document is written with the `github.com/n0-computer/test-plans` repository in mind.
+This document is written with the `github.com/n0-computer/test-plans` repository in mind.It is written for rust, but we welcome both rust and go testplans!!!
 
 #### How do I set up my test plan?
 Your test plan should be written as a new crate in the `data-transfer` folder:
@@ -51,6 +51,112 @@ Testground will output any logs you add in the testplan and in your protocol, as
 Testground will prefix those logs with the specific instance's sequence number and a hash id, so you will have context for which node is outputting what
 logging.
 
+### Testground Tooling
+I will go more into depth on some of these parts in the example, but in general, there are 4 main ways you are going to use the testground tooling:
+1) passing in parameters
+2) network configuration
+3) pub/sub
+4) sync locks
+
+#### passing in parameters using compositions
+There are other ways to pass in parameters, but for the purpose of this guide, we are going to use the composition toml files. These are really meant for situations where you are running multiple tests grouped in a more complicated manner (check out the libp2p test plans for an example), but I am co-opting them for this process, since it simplifies the terminal command you need for running the test plan itself.
+
+```toml
+[metadata]
+  name = "krakensync"
+
+[global]
+  plan = "krakensync"
+  case = "one_to_one"
+  builder = "docker:generic"
+  runner = "local:docker"
+  total_instances = 2
+  disable_metrics = false
+
+[[groups]]
+  id = "group1"
+  [groups.instances]
+    count = 2
+  [groups.run]
+    [groups.run.test_params]
+      latency = "100"
+      bandwidth = "10485760"
+```
+
+The composition file allows you to pass in the plan, case, builder, runner, and instances needed for this test. You can also pass in test parameters, here we are passing in latency and bandwidth, that get picked up by the test using the `client.run_parameters()` methods.
+```
+    let bandwidth: u64 = client
+        .run_parameters()
+        .test_instance_params
+        .get("bandwidth")
+        .unwrap()
+        .parse()
+        .unwrap();
+``` 
+
+#### Network Configuration
+How to add network configuration, adapted from From the libp2p rust testplans:
+```rust
+    use testground::network_conf::{
+        FilterAction, LinkShape, NetworkConfiguration, RoutingPolicyType, DEFAULT_DATA_NETWORK,
+    };
+    ...
+
+    let latency: u64 = client
+        .run_parameters()
+        .test_instance_params
+        .get("latency")
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let bandwidth: u64 = client
+        .run_parameters()
+        .test_instance_params
+        .get("bandwidth")
+        .unwrap()
+        .parse()
+        .unwrap();
+
+
+        let latency = Duration::from_millis(latency)
+            .as_nanos()
+            .try_into()
+            .unwrap();
+
+        let network_conf = NetworkConfiguration {
+            network: DEFAULT_DATA_NETWORK.to_owned(),
+            ipv4: None,
+            ipv6: None,
+            enable: true,
+            default: LinkShape {
+                latency,
+                jitter: 0,
+                bandwidth,
+                filter: FilterAction::Accept,
+                loss: 0.0,
+                corrupt: 0.0,
+                corrupt_corr: 0.0,
+                reorder: 0.0,
+                reorder_corr: 0.0,
+                duplicate: 0.0,
+                duplicate_corr: 0.0,
+            },
+            rules: None,
+            callback_state: format!("network-configured-{}", i),
+            callback_target: Some(client.run_parameters().test_instance_count),
+            routing_policy: RoutingPolicyType::AllowAll,
+        };
+
+        client.configure_network(network_conf).await.unwrap();
+```
+
+#### pub/sub
+[learn more below](#pubsub)
+
+#### sync locks
+[learn more below](#sync)
+
 ## Basic example: TCP
 Let's walk through an example that removes all protocol complexity, and leaves only the testground complexity: it can be found at `test-plan/movethebytes/data-transfer/rust/bin/tcp.rs`.
 
@@ -71,37 +177,20 @@ different parameters, as you can see in the `sdk-rust` example:
 ### The test function
 This is where the testground `Client` gets built.
 
-The `Client` is how you have access to metadata about the instance itself, such
-as the `global_seq` number, which gets used in a few places, and how to
-coordinate with the other instances. This coordination happens "out of band" of
-whatever server/client configuration you write in the test itself. It's how you
-can pass around your instance's address & get the address of the other
-instances, as well as any generated Cids you need to exchange. You also use the
-client to sync the timing of things like:
-- ensuring instance A doesn't dial instance B until instance B has been created
-  & is waiting for a connection
-- ensuring instance C keeps running until instance D has been able to request
-  and verify some content from instance C
+The `Client` is how you have access to metadata about the instance itself, such as the `global_seq` number, to coordinate with the other instances, and network configuration. This coordination happens "out of band" of whatever server/client configuration you write in the test itself. It's how you can pass around your instance's address & get the address of the other instances, as well as any generated CIDs you need to exchange. You also use the client to sync the timing of things like:
+- ensuring instance A doesn't dial instance B until instance B has been created & is waiting for a connection
+- ensuring instance C keeps running until instance D has been able to request and verify some content from instance C
 
-The "run test" function not only creates the client, but also helps the test
-runner determine what "kind" of role this instance is going to have in the
-test. 
+The "run test" function not only creates the client, but also helps the test runner determine what "kind" of role this instance is going to have in the test. 
 
-In this particular case, we will only have 2 roles, a `server` and a `client`.
-In a p2p context `server` and `client` don't always make sense. For example, if
-you are testing a network's ability to connect to every other node in the
-network, you may only have one "role" that every node in that test takes on.
-You may have more than 2 roles!
+In this particular case, we will only have 2 roles, a `server` and a `client`. In a p2p context `server` and `client` don't always make sense. For example, if you are testing a network's ability to connect to every other node in the network, you may only have one "role" that every node in that test takes on. You may have more than 2 roles!
 
-But in this case, and in the case of this data transfer plan (currently), we are
-only looking at point to point transfer between two nodes.
+But in this case, and in the case of this data transfer plan (currently), we are only looking at point to point transfer between two nodes.
 
-We differentiate roles by using the global sequence number. In this case, nodes
-with `seq % 2 = 0` are clients, and `seq % 2 = 1` are servers.
+We differentiate roles by using the global sequence number. In this case, nodes with `seq % 2 = 0` are clients, and `seq % 2 = 1` are servers. __NOTE: this is not the ideal way to do this, we should be using `TEST_GROUP_ID`, update on this soon_
 
 ### The "server" and "client" functions
-These functions set up their nodes based on the expected behaviour. But in
-general, this is what each function needs to do:
+These functions set up their nodes based on the expected behaviour. But in general, this is what each function needs to do:
     - get your ip address
     - build your node & connect
     - communicate your address (or other information) to the rest of the
@@ -134,6 +223,7 @@ a `String` that can parse to a `SocketAddr`. See another example in the
 #### build and run your node
 This is different for each test. In the TCP test, the we build and run a Tcp server bound to the previously found `local_addr`. In a more complex test, this is where you may build and run your node.
 
+<a name="pubsub">
 #### advertise your address and connect to other nodes:
 To advertise your address (or any other data, like available `Cid`s), use the `client.publish` method. In the TCP example
 we do:
@@ -190,6 +280,7 @@ example](https://github.com/libp2p/test-plans/blob/master/ping/rust/src/lib.rs#L
 #### test!
 In the TCP example, we just ensure there is a connection. In the data transfer example, we will attempt to fetch a CID from the network.
 
+<a name="sync">
 #### syncing nodes using `signal` and `signal_and_wait`
 In our TCP example, we need to ensure that the server nodes stay running until the client nodes have had a chance to connect. We do this by using `signal` and `signal_and_wait`.
 
@@ -205,62 +296,6 @@ If you made it to the end of your test, have the instance record a success: `cli
 ## Expected test parameters
 Use the `fixtures/10MiB.car` file as your input.
 The expected latency, bandwidth, etc, is notated in the `_compositions/krakensync.toml` file.
-
-How to add network configuration, adapted from From the libp2p rust testplans:
-```rust
-    use testground::network_conf::{
-        FilterAction, LinkShape, NetworkConfiguration, RoutingPolicyType, DEFAULT_DATA_NETWORK,
-    };
-    ...
-
-    let latency: u64 = client
-        .run_parameters()
-        .test_instance_params
-        .get("latency")
-        .unwrap()
-        .parse()
-        .unwrap();
-
-    let bandwidth: u64 = client
-        .run_parameters()
-        .test_instance_params
-        .get("bandwidth")
-        .unwrap()
-        .parse()
-        .unwrap();
-
-
-        let latency = Duration::from_millis(latency)
-            .as_nanos()
-            .try_into()
-            .unwrap();
-
-        let network_conf = NetworkConfiguration {
-            network: DEFAULT_DATA_NETWORK.to_owned(),
-            ipv4: None,
-            ipv6: None,
-            enable: true,
-            default: LinkShape {
-                latency,
-                jitter: 0,
-                bandwidth,
-                filter: FilterAction::Accept,
-                loss: 0.0,
-                corrupt: 0.0,
-                corrupt_corr: 0.0,
-                reorder: 0.0,
-                reorder_corr: 0.0,
-                duplicate: 0.0,
-                duplicate_corr: 0.0,
-            },
-            rules: None,
-            callback_state: format!("network-configured-{}", i),
-            callback_target: Some(client.run_parameters().test_instance_count),
-            routing_policy: RoutingPolicyType::AllowAll,
-        };
-
-        client.configure_network(network_conf).await.unwrap();
-```
 
 ## metrics
 Ensure the following metrics with the specified text are output to the test instance. This can be done in the test plan itself, or in the protocol library.

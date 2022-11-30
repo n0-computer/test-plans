@@ -15,5 +15,5 @@
     count = 2
   [groups.run]
     [groups.run.test_params]
-      latency = "100"
-      bandwidth = "10485760"
+      latency = "10"
+      bandwidth = "1073741824"

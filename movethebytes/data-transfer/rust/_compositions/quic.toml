@@ -17,6 +17,5 @@
     count = 2
   [groups.run]
     [groups.run.test_params]
-      latency = "100ms"
-      bandwidth = "10MiB"
-      bslatency="100ms"
+      latency = "10"
+      bandwidth = "1073741824"
