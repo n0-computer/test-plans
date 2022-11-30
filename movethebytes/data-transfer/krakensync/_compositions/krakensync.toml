@@ -1,0 +1,19 @@
+[metadata]
+  name = "krakensync"
+
+[global]
+  plan = "krakensync"
+  case = "one_to_one"
+  builder = "docker:generic"
+  runner = "local:docker"
+  total_instances = 2
+  disable_metrics = false
+
+[[groups]]
+  id = "group1"
+  [groups.instances]
+    count = 2
+  [groups.run]
+    [groups.run.test_params]
+      latency = "10"
+      bandwidth = "1073741824"

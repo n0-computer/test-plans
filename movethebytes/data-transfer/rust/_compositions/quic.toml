@@ -1,0 +1,21 @@
+[metadata]
+  name = "quic"
+
+[global]
+  plan = "rust"
+  case = "quic"
+  builder = "docker:generic"
+  runner = "local:docker"
+  total_instances = 2
+  disable_metrics = false
+
+[[groups]]
+  id = "groups1"
+  [groups.build_config.build_args]
+  BINARY_NAME = "quic"
+  [groups.instances]
+    count = 2
+  [groups.run]
+    [groups.run.test_params]
+      latency = "10"
+      bandwidth = "1073741824"
