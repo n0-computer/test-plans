@@ -1,0 +1,23 @@
+name = "bitswap"
+
+[defaults]
+  builder = "exec:go"
+  runner = "local:exec"
+
+[builders."docker:go"]
+  enabled = true
+  module_path = "github.com/n0-computer/test-plans/movethebytes/bitswap"
+  exec_pkg = "."
+  build_base_image = "golang:1.17-buster"
+
+[runners]
+  "local:docker" = { enabled = true }
+  "cluster:k8s" = { enabled = true }
+
+[[testcases]]
+  name = "speed-test"
+  instances = { min = 2, max = 100, default = 2 }
+
+  [testcases.params]
+  size = { type = "int", desc = "size of file to transfer, in human-friendly form", default = "1MiB" }
+  count = { type = "int", desc = "number of transfers", default = "10" }
