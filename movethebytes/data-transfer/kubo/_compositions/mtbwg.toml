@@ -1,0 +1,26 @@
+[metadata]
+  name = "bitswap-local-speed-test"
+
+[global]
+  plan = "bitswap"
+  case = "speed-test"
+  total_instances = 11
+  builder = "docker:go"
+  runner = "local:docker"
+
+[global.build_config]
+  push_registry=false
+
+[global.run.test_params]
+    size      = "2MB"
+    count     = "5"
+    latency = "10ms"
+    bandwidth = "1GiB"
+
+[[groups]]
+  id = "providers"
+  instances = { count = 10 }
+
+[[groups]]
+  id = "requestors"
+  instances = { count = 1 }
